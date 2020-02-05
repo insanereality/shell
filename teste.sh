@@ -117,6 +117,7 @@ echo
 	echo -e "	Nameservers: https://www.whatsmydns.net/#NS/${dom}"
 	echo -e "	Registro SOA: https://www.whatsmydns.net/#SOA/${dom}"
 	echo -e "	RegistroBR: https://hetrixtools.com/blacklist-check/${dom}"
+	echo -e "	Checksite: checksites -d ${dom}"
 echo	
 echo -e "${C_GREEN}Verificar blacklists${RESET}"
 
