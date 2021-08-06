@@ -1,0 +1,234 @@
+#!/bin/bash
+clear
+
+echo -e "#################################################"
+echo -e "#    SCRIPT DE ATUALIZAÇÃO DA BASE SUPORTE      #"
+echo -e "#################################################"
+
+
+###############################
+#CORES
+
+BYellow='\033[1;33m'
+BCyan='\033[1;36m'
+RED="31"
+GREEN="32"
+BOLDGREEN="\e[1;${GREEN}m"
+BOLDRED="\e[1;${RED}m"
+ITALICRED="\e[3;${RED}m"
+coff="\e[0m"
+###############################
+
+# Termina o script caso algum comando falhe
+#set -e
+
+echo -e
+echo -e "Verificando atraso da réplica..."
+echo -e
+#	ssh root@172.16.128.182 '/home/postgres/atraso_replica.sh'
+	verificar_data(){
+psql -1 -v ON_ERROR_STOP=1 -h 172.16.128.182 -p 5439 -d colmeia_slave -U postgres -X -q -t <<EOF
+\a
+        SELECT current_timestamp - max(trn_versao) <= '20 minutes' from colmeia.tb_gco_transitoria;
+EOF
+}
+        if [[ $(verificar_data) = 't' ]]
+        then
+		echo "[SUCESSO] Atraso da réplica menor que 20 minutos, prosseguindo..."
+
+	else
+                echo "[FALHA] Atraso deve ser menor que 20 minutos. Aguarde e tente novamente."
+		echo -e
+		echo "https://monitoramento.cresolconfederacao.com.br/grafana/d/LQmF3ojZz/tmux-colmeia-slave-replica?orgId=1&refresh=15s"
+		exit
+		echo -e
+		echo -e
+	fi
+echo -e
+echo -e
+
+echo "Baixando o Contexto da Base Suporte..."
+	ssh root@172.16.128.51 "su - jboss -c '/opt/redhat/jboss/jboss-eap-6.1/bin/init.d/suporte stop'" || { echo 'Não foi possível baixar o colmeia de suporte. Verificar!' ; exit 1; }
+echo -e
+
+echo -e
+echo "Verificando se a base ainda está no ar..."
+	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd/ status'
+echo -e
+echo -e
+
+echo -e
+echo "Parando a base..."
+    	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd/ stop -m fast'
+echo -e
+echo -e
+
+#echo -e
+    #Certificar-se de que todos os processos envolvendo "Postgres" foram finalizados;
+    #kill -9 $(ps aux | grep suporte | egrep -v "grep|root" | awk '{print $2}')
+
+#echo "Eliminando PIDs que estejam bloqueando o ponto de montagem da base..."
+#    kill -9 $(lsof -t /stg/prd_replica_suporte/)
+#echo -e
+
+echo -e
+echo "Desmontando o ponto de montagem /stg/prd_replica_suporte..."
+echo -e
+    	umount /stg/prd_replica_suporte/
+
+#echo -e
+#echo "Verificar se o ponto de montagem /stg/prd_replica_suporte foi desmontado:"
+#echo -e
+#    	df -h | grep suporte
+
+echo -e "Acessar a storage e iniciar a cópia (user: teste / pass: teste123)"
+echo -e "https://storagecpd01.cresolconfederacao.com.br/gui#copyservices-fc"
+#    Clicar com o botão direito sobre PRD_REPLICA_SUPORTE e então PARAR.
+
+echo -e
+echo -e "${BYellow}Cópia foi iniciada [S/N] ?${coff}"
+read PERGUNTA
+case ${PERGUNTA} in
+     y|Y|yes|s|S|sim)
+echo -e
+
+echo "Remontando ponto de montagem de suporte..."
+echo -e
+    	mount /dev/vda /stg/prd_replica_suporte -o rw,noatime,data=writeback,barrier=0,nobh,commit=15
+echo -e
+
+#echo -e
+#echo "Verificando se o ponto de montagem dos archives está montado..."
+#echo -e
+    #mount -v -t  nfs  -o nfsvers=4 172.16.128.182:/stg/prd_archives/9.6.colmeia.archives.prd /stg/archives/9.6.colmeia.archives.prd
+
+echo "Removendo arquivos de log do PG..."
+echo -e
+    	rm -Rf /stg/prd_replica_suporte/9.6.colmeia_prd/pg_log
+echo -e
+
+echo "Removendo arquivo postmaster.pid..."
+echo -e
+    	rm -Rf /stg/prd_replica_suporte/9.6.colmeia_prd/postmaster.pid
+echo -e
+
+echo "Ajustando permissão do diretório de dados para o usuário Postgres..."
+echo -e
+    	chown -R postgres:postgres /stg/prd_replica_suporte/
+echo -e
+
+echo "Copiando arquivo com as permissões de conexão ao banco..."
+echo -e
+    	cp /var/lib/postgresql/sql/default/postgresql.auto.conf.1 /stg/prd_replica_suporte/9.6.colmeia_prd/postgresql.auto.conf
+echo -e
+echo -e
+
+echo "Iniciando instância da base suporte..."
+echo -e
+    	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd start'
+echo -e
+echo -e
+
+echo "Aguardando base ficar consistente..."
+echo -e
+
+sleep 30
+count=1
+    while [ "$count" -lt 10 ]
+   	    do
+	    grep 'consistent' /stg/prd_replica_suporte/9.6.colmeia_prd/pg_log/postgresql-*.csv --color
+
+		    if [ "$?" -ne "0" ] 
+    		then
+	    		echo "Base não está consistente. Aguardando..."
+	    	else
+	    		break
+	    	fi
+	
+	count=$((count+1))
+	sleep 300
+   	done
+
+echo -e
+echo -e
+
+echo    "Executando a promoção da base..."
+echo -e
+	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd promote'
+echo -e
+echo -e
+
+echo    "Confirmando promoção da base (autovacuum launcher started)..."
+echo -e
+    sleep 30
+    count=1
+    while [ "$count" -lt 5 ]
+       	do
+    	grep 'autovacuum launcher started' /stg/prd_replica_suporte/*/pg_log/postgresql-*.csv --color
+
+    		if [ "$?" -ne "0" ] 
+    		then
+    			echo "Base ainda não promovida. Aguardando..."
+    		else
+    			break
+    		fi
+
+	count=$((count+1))
+	sleep 60
+   	done
+
+echo -e
+echo -e
+
+echo    "Renomeando a base..."
+echo -e
+    	su - postgres -c "psql -p 5437 -c 'ALTER DATABASE colmeia_slave RENAME TO suporte;'"
+echo -e
+echo -e
+
+echo    "Executando script padrão que ajusta as configurações e permissões da base..."
+echo -e
+    	su - postgres -c "psql -p 5437 suporte -f /var/lib/postgresql/sql/default/2-scriptPadrao.sql"
+echo -e
+echo -e
+
+echo    "Adicionando comentário de data e hora na base..."
+echo -e
+    	su - postgres -c "/var/lib/postgresql/data-atual.sh"
+echo -e
+echo -e
+
+echo    "Parando instância da base suporte..."
+    	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd/ stop -m fast'
+echo -e
+echo -e
+
+echo    "Adicionando configuracao no pg_hba.conf..."
+    	echo "host all all 0/0 trust" >> /stg/prd_replica_suporte/9.6.colmeia_prd/pg_hba.conf
+echo -e
+echo -e
+
+echo "Subindo instância novamente..."
+    	su - postgres -c 'pg_ctl -D /stg/prd_replica_suporte/9.6.colmeia_prd/ start'
+echo -e
+echo -e
+
+
+echo "Subindo o Contexto da base suporte..."
+    	ssh root@172.16.128.51 "su - jboss -c '/opt/redhat/jboss/jboss-eap-6.1/bin/init.d/suporte start'"
+echo -e
+echo -e
+
+#    Verificar se o contexto de suporte subiu e está logando
+#    http://contexto-suporte.cresolconfederacao.com.br:8080/colmeia/
+#    Login: JOAO / Senha: ferroada
+
+    ;;
+    n|N|no|nao)
+
+echo -e "Verificar e tentar novamente!"
+    ;;
+    *)
+    exit 0
+;;
+esac
