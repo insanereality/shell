@@ -59,7 +59,7 @@ echo
 echo -e "${C_GREEN}//Motion  status//${RESET}"
 echo -e "${C_GREEN}+------------------------------------------------------------------+${RESET}"
 echo
-service exim motion | grep -i "Active:"
+service status motion | grep -i "Active:"
 echo
 echo
  
@@ -222,7 +222,7 @@ echo
 13)
 echo
 	echo -e "${C_GREEN}NGINX error log${RESET}"
-	/var/log/nginx/error_log
+	/var/log/nginx/error.log
 ;;
 
 14)
