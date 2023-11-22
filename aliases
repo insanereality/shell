@@ -1,0 +1,8 @@
+alias xcallylogs='cd /var/log/xcally && ls -ltrh'
+alias nginxlogs='cd /var/log/nginx && ls -lrth'
+alias nginxerrorlog='tail -f /var/log/nginx/error.log'
+alias nginxacceslog='tail -n 50 /var/log/nginx/access.log'
+alias agentesxcally='curl -X GET http://localhost:3335'
+alias requisicoesip='netstat -n |cut -c 45- |cut -f 1 -d ':'| sort|uniq -c |sort -nr | more'
+alias clstatus='clear && pcs status'
+alias clresources='clear && pcs resource status'
